@@ -41,6 +41,7 @@ BATCH_SIZE = 30
 WINDOW_LENGTH = 20
 BUFFER_BIAS_RATIO = 1e-5
 DELTA_MU = 1e-10
+NB_ACTIONS = 10
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,9 @@ class DataSrc(object):
                 self.stats["mean"][nb_pc:] + self.stats["std"][nb_pc:] * 10
             )
 
+        sequence = np.around(sequence, 1)
+
+
         return sequence
 
         """
@@ -414,7 +418,7 @@ class PortfolioSim(object):
         self.w0 = np.array([1.0] + [0.0] * len(self.tickers_list))
         self.p0 = 1.0
 
-class PortfolioEnv(gym.Env):
+class DiscretePortfolioEnv(gym.Env):
     """
     An environment for financial portfolio management.
 
@@ -510,7 +514,7 @@ class PortfolioEnv(gym.Env):
         # action will be the portfolio weights [cash_bias,w1,w2...] where wn are [0, 1] for each asset
         nb_assets = len(self.src.asset_names)
         self.action_space = gym.spaces.Box(
-            0.0, 1.0, shape=(nb_assets,), dtype = np.float32 )
+            0, NB_ACTIONS, shape=(nb_assets,), dtype = np.int8 )
 
         # get the history space from the data min and max
         if output_mode == 'EIIE':
@@ -562,7 +566,7 @@ class PortfolioEnv(gym.Env):
         """
         logging.debug('action: %s', action)
 
-        weights = np.clip(action, 0.0, 1.0)
+        weights = np.clip(action/NB_ACTIONS, 0.0, 1.0)
         weights /= weights.sum() + eps
 
         # Sanity checks

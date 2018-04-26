@@ -19,6 +19,11 @@ class TestReplayBuffer(unittest.TestCase):
                                          batch_size=self.batch_size, is_permed=True,
                                          sample_bias=self.sample_bias)
 
+        self.replayBuffer_Full = ReplayBuffer(start_index=self.start_index, end_index=self.end_index,
+                                                  batch_size=0, is_permed=False,
+                                                  sample_bias=self.sample_bias)
+
+
     def test_batch_size(self):
         batch = self.replayBuffer.next_experience_batch()
         self.assertEquals(len(batch), self.batch_size,"batch size has to be as long as the parameter batch_size")
@@ -38,4 +43,16 @@ class TestReplayBuffer(unittest.TestCase):
     def test_append(self):
         state_index = self.end_index +1
         self.replayBuffer.append_experience(state_index)
-        self.assertEquals(self.end_index-self.start_index +1, len(self.replayBuffer._experiences) )
+        self.assertEquals(self.end_index-self.start_index +2, len(self.replayBuffer._experiences) )
+
+    def test_bias_zero(self):
+        replayBuffer = ReplayBuffer(start_index=self.start_index, end_index=self.end_index,
+                                              batch_size=0, is_permed=False,
+                                              sample_bias=self.sample_bias)
+        self.assertEqual(0, replayBuffer._sample_bias, "bias is null for full replay")
+
+    def test_full_batchsize(self):
+        total = self.end_index - self.start_index +1
+        self.assertEqual(total, self.replayBuffer_Full._batch_size, "all experiences if batch size equal zero")
+        self.assertEqual(0, self.replayBuffer_Full._sample_bias, "bias null if full batchsize")
+        self.assertEqual(0, self.replayBuffer_Full._sample(self.start_index, self.end_index, 0), "must start at zero in full replay")

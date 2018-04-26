@@ -69,7 +69,7 @@ class TestDataSrc(unittest.TestCase):
 
     def test_step(self):
         initial_step= self.src.step
-        X, y, last_w, setw, done = self.src._step()
+        X, y, last_w, setw, open_history, done = self.src._step()
         self.assertEqual(False, done, "batch should continue")
         next_step = self.src.step
         self.assertEqual(1, next_step - initial_step, "step must grow by 1")
@@ -80,7 +80,22 @@ class TestDataSrc(unittest.TestCase):
         self.src.reset()
         initial_step = self.src.step
         for i in range(0, self.src.batch_size-1):
-            X, y, last_w, setw, done = self.src._step()
+            X, y, last_w, setw, open_history, done = self.src._step()
         self.assertEqual(initial_step + self.src.batch_size - 1, self.src.step, "step must end at batch_size -1")
         self.assertEqual(True, done, "batch should finish")
 
+    def test_keep_last(self):
+        """
+        because we take the previous data, we can only start at one
+        :return:
+        """
+        src = DataSrc(start_date=self.start_date, end_date=self.end_date,
+                           tickers_list=self.tickers_list, features_list=self.features_list,
+                           batch_size=0, scale=self.scale,
+                           scale_extra_cols=self.scale_extra_cols,
+                           buffer_bias_ratio=self.buffer_bias_ratio,
+                           window_length=self.window_length, is_permed=self.is_permed)
+        src.reset()
+        self.assertEqual(0, src.step, "step equal zero in reset")
+        src._step()
+        self.assertEqual(1, src.step, "step start at one")

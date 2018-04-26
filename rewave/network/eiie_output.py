@@ -207,7 +207,7 @@ class EIIE_OutPut(Layer):
         self.stride = 1
         self.padding = 'VALID'
         self.bias = True
-        activation = 'linear'
+        activation = 'relu'
         self.l2_regularization = l2_regularization
         self.l1_regularization = l1_regularization
         self.nonlinearity = Nonlinearity(name=activation, summary_labels=summary_labels)

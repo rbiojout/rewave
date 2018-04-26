@@ -111,24 +111,45 @@ class EpisodeFinishedTQDM(object):
     """Logger for tensorforce using tqdm_notebook for jupyter-notebook."""
 
     def __init__(self,
-                 steps,
-                 log_intv,
+                 render_intv,
+                 episodes = None,
+                 timesteps = None,
+                 tensorboard_intv=100,
                  session=None,
                  log_dir=None,
-                 episode=0, mean_of=10,
-                 save_dir=None, save_every=10
+                 episode=0,
+                 mean_of=10,
+                 save_dir=None,
+                 save_every=10
                  ):
+        """
+
+        :param episodes: number of episodes to run
+        :param render_intv: interval in episodes between rendering
+        :param timesteps:
+        :param tensorboard_intv: interval in episodes beetween loging for tensorboard
+        :param session:
+        :param log_dir:
+        :param episode:
+        :param mean_of:
+        :param save_dir:
+        :param save_every:
+        """
+
+
         """
         log_intv - print the mean metrics every log_intv episodes
         """
-        # super().__init__(log_intv=log_intv)
-        self.steps = steps
+        # super().__init__(log_intv=render_intv)
+        self.episodes = episodes
+        self.timesteps = timesteps
         self.mean_of = mean_of
-        self.log_intv = log_intv
+        self.render_intv = render_intv
+        self.tensorboard_intv = tensorboard_intv
         self.save_dir = save_dir
         self.save_every = save_every
         self.progbar = tqdm_notebook(
-            desc='', total=steps, unit='steps', leave=True, mininterval=3)
+            desc='', total=timesteps, unit=' timesteps', leave=True, mininterval=3)
 
         # tensorboard
         if log_dir:
@@ -161,42 +182,43 @@ class EpisodeFinishedTQDM(object):
         self.progbar.update(r.episode_timesteps[-1])
 
         # print every now and again
-        if r.episode % self.log_intv == 0:
+        if r.episode % self.render_intv == 0:
             print(desc)
             oai_env.render(mode='notebook')
 
-        # log to tensorboard
-        logs = dict(
-            # episode_rewards=r.episode_rewards[-1],
-            episode_timesteps=r.episode_timesteps[-1],
-            episode_time=r.episode_times[-1],
-            portfolio_value=oai_env.sim.p0,
-            exploration=exploration,
-            sharpe=sharpe(rate_of_return),
-            mdd=MDD(rate_of_return + 1),
-        )
+        if r.episode % self.tensorboard_intv == 0:
+            # log to tensorboard
+            logs = dict(
+                # episode_rewards=r.episode_rewards[-1],
+                episode_timesteps=r.episode_timesteps[-1],
+                episode_time=r.episode_times[-1],
+                portfolio_value=oai_env.sim.p0,
+                exploration=exploration,
+                sharpe=sharpe(rate_of_return),
+                mdd=MDD(rate_of_return + 1),
+            )
 
-        # logs info means
-        ep_infos = df_info.mean().to_dict()
-        logs.update(ep_infos)
+            # logs info means
+            ep_infos = df_info.mean().to_dict()
+            logs.update(ep_infos)
 
-        # and some arrays
-        histograms = {}
-        # histograms = dict(
-        #     return_hist=df_info['market_return'].values,
-        #     rate_of_return_hist=rate_of_return,
-        #     portfolio_value_hist=df_info.portfolio_value.values,
-        #     market_value_hist=df_info.market_value.values,
-        #     last_weight_hist=oai_env.sim.w0,
-        # )
-        # # and each weight dist
-        # for i, w in enumerate(oai_env.sim.w0):
-        #     histograms[oai_env.src.asset_names[i] + '_hist'] = df_info['weight_' + oai_env.src.asset_names[i]]
+            # and some arrays
+            histograms = {}
+            # histograms = dict(
+            #     return_hist=df_info['market_return'].values,
+            #     rate_of_return_hist=rate_of_return,
+            #     portfolio_value_hist=df_info.portfolio_value.values,
+            #     market_value_hist=df_info.market_value.values,
+            #     last_weight_hist=oai_env.sim.w0,
+            # )
+            # # and each weight dist
+            # for i, w in enumerate(oai_env.sim.w0):
+            #     histograms[oai_env.src.asset_names[i] + '_hist'] = df_info['weight_' + oai_env.src.asset_names[i]]
 
-        self.tensor_board_logger.log(
-            logs=logs,
-            histograms=histograms,
-            episode=r.episode)
+            self.tensor_board_logger.log(
+                logs=logs,
+                histograms=histograms,
+                episode=r.episode)
 
         # save sometimes
         if self.save_dir and (r.episode % self.save_every == 0):
@@ -204,4 +226,7 @@ class EpisodeFinishedTQDM(object):
             print('saved to', self.save_dir)
 
         # and halt if we are beyond out max steps
-        return r.timestep < self.steps
+        should_stop = (self.episodes is not None and r.episode >= self.episodes) or \
+                    (self.timesteps is not None and r.timestep >= self.timesteps)
+
+        return not should_stop

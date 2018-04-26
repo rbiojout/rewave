@@ -11,7 +11,7 @@ import numpy as np
 
 from rewave.marketdata.globaldatamatrix import HistoryManager
 from rewave.marketdata.datamatrices import DataMatrices
-from rewave.environment.long_portfolio import PortfolioEnv
+from rewave.environment.long_portfolio import PortfolioEnv, DataSrc
 from rewave.wrappers import SoftmaxActions, ConcatStates
 from rewave.callbacks.tensorforce import EpisodeFinishedTQDM, EpisodeFinished
 from rewave.tools.util import MDD, sharpe
@@ -35,12 +35,12 @@ window_size = 20
 validation_portion = 0.15
 feature_list = ['close', 'high', 'low', 'open']
 feature_number = len(feature_list)
-ticker_list = ['AAPL', 'A']
+ticker_list = ['AAPL','A','MSFT','B','C']
 ticker_number = len(ticker_list)
 
 
-from tensorforce.contrib.openai_gym import OpenAIGym
-class TFOpenAIGymCust(OpenAIGym):
+from rewave.environment.openai_gym_cust import OpenAIGymCustom
+class TFOpenAIGymCust(OpenAIGymCustom):
     def __init__(self, gym_id, gym):
         self.gym_id = gym_id
         self.gym = gym
@@ -209,6 +209,15 @@ def main():
                              ticker_list=ticker_list)
     fake_data = [[[0]]]
 
+    src = DataSrc(start_date=start,
+                  end_date=end,
+                  features_list=feature_list,
+                  tickers_list=ticker_list,
+                  batch_size=0, scale=True,
+                  scale_extra_cols=False,
+                  buffer_bias_ratio=1e-5,
+                  window_length=30, is_permed=False)
+
     env = PortfolioEnv(
         start_date=start,
         end_date=end,
@@ -227,11 +236,13 @@ def main():
         env.step(action=action)
 
     # wrap it in a few wrappers
-    env = ConcatStates(env)
-    env = SoftmaxActions(env)
     environment = TFOpenAIGymCust('CryptoPortfolioEIIE-v0', env)
 
     env.seed(0)
+
+    step, terminal, reward = environment.execute(env.action_space.sample())
+    step, terminal, reward = environment.execute(env.action_space.sample())
+    step, terminal, reward = environment.execute(env.action_space.sample())
 
     explorations_spec = dict(
         type="epsilon_anneal",

@@ -44,6 +44,7 @@ class OpenAIGymCustom(Environment):
 
         self.gym_id = gym_id
         self.gym = gym.make(gym_id)  # Might raise gym.error.UnregisteredEnv or gym.error.DeprecatedEnv
+
         self.visualize = visualize
 
         if monitor:
@@ -52,6 +53,8 @@ class OpenAIGymCustom(Environment):
             else:
                 video_callable = (lambda x: x % monitor_video == 0)
             self.gym = gym.wrappers.Monitor(self.gym, monitor, force=not monitor_safe, video_callable=video_callable)
+
+        self.reset()
 
     def __str__(self):
         return 'OpenAIGymCustom({})'.format(self.gym_id)
@@ -66,13 +69,16 @@ class OpenAIGymCustom(Environment):
         return self.gym.reset()
 
     def execute(self, actions):
-        if self.visualize:
-            self.gym.render()
         # if the actions is not unique, that is, if the actions is a dict
         if isinstance(actions, dict):
             actions = [actions['action{}'.format(n)] for n in range(len(actions))]
         state, reward, terminal, _ = self.gym.step(actions)
+        self.render()
         return state, terminal, reward
+
+    def render(self):
+        if self.visualize:
+            self.gym.render()
 
     @property
     def states(self):
@@ -135,15 +141,29 @@ class OpenAIGymCustom(Environment):
                 return actions
         elif isinstance(space, gym.spaces.Tuple):
             actions = dict()
+            n = 0
             for subspace in space.spaces:
                 action = OpenAIGymCustom.action_from_space(space=space.spaces[subspace])
-                actions[subspace] = action
+                if 'type' in action:
+                    actions['action{}'.format(n)] = action
+                    n += 1
+                else:
+                    for action in action.values():
+                        actions['action{}'.format(n)] = action
+                        n += 1
             return actions
         elif isinstance(space, gym.spaces.Dict):
             actions = dict()
+            n = 0
             for subspace in space.spaces:
                 action = OpenAIGymCustom.action_from_space(space=space.spaces[subspace])
-                actions[subspace] = action
+                if 'type' in action:
+                    actions['action{}'.format(n)] = action
+                    n += 1
+                else:
+                    for action in action.values():
+                        actions['action{}'.format(n)] = action
+                        n += 1
             return actions
         else:
             raise TensorForceError('Unknown Gym space.')

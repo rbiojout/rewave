@@ -16,8 +16,8 @@ from rewave.environment import long_portfolio, env_specs
 def test_src_outputs(spec_id):
     """check we arn't giving future prices to model"""
     env = gym.envs.spec(spec_id).make()
-    X0, y0, _, _, _ = env.src._step()
-    _, y1, _, _, _ = env.src._step()
+    X0, y0, _, _, _, _ = env.src._step()
+    _, y1, _, _, _, _ = env.src._step()
     # so relative price vector for calulating this steps returns is
     # y(t) = y = v(t)/v(t-1)
     # while y(t-1) = y_last =  v(t-1)/v(t-2)
@@ -64,6 +64,7 @@ def test_env_outputs(spec_id):
     assert np.isfinite(reward), 'reward should be finite'
     assert not done
     for k, v in info.items():
+        print('env info item %s=%s should be finite' % (k, v))
         assert np.isfinite(v), 'env info item %s=%s should be finite' % (k, v)
         assert isinstance(
             v, (int, float, np.float32, np.float64)), 'env info item %s=%s should be int or float' % (k, v)

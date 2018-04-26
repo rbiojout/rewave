@@ -1,8 +1,9 @@
 import os
 import numpy as np
+
 from matplotlib import pyplot as plt
-plt.rcParams["figure.figsize"] = (8,8)
-plt.rcParams["figure.dpi"] = 72
+#plt.rcParams["figure.figsize"] = (8,8)
+#plt.rcParams["figure.dpi"] = 72
 
 from matplotlib import dates as mdates
 import matplotlib

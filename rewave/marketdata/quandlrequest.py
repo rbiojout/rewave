@@ -26,7 +26,7 @@ year = day*365
 PUBLIC_COMMANDS = ['returnTicker', 'return24hVolume', 'returnOrderBook', 'returnTradeHistory', 'returnChartData', 'returnCurrencies', 'returnLoanOrders']
 
 class QuandlRequest:
-    def __init__(self, APIKey='zpFWg7jpwtBPmzA8sT2Z'):
+    def __init__(self, APIKey='mFpzEFZevyB1hVRyaBKu'):
         self.APIKey = APIKey.encode()
         # self.APIVersion = APIVersion.encode()
         # Conversions
