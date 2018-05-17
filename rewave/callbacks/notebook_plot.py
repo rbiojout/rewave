@@ -64,14 +64,20 @@ class LivePlotNotebook(object):
         self.ax = ax
         self.fig = fig
 
-    def update(self, x, ys):
+    def update(self, x, ys, max=None):
         # let Matplotlib deal with the format of axis
+
+        if max:
+            x = x[-max:]
+            for i in range(len(ys)):
+                ys[i] = ys[i][-max:]
 
         for i in range(len(ys)):
             # update price
             line = self.ax.lines[i]
             line.set_xdata(x)
             line.set_ydata(ys[i])
+
 
         # update limits
         y = np.concatenate(ys)

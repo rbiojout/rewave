@@ -37,6 +37,8 @@ from rewave.constants import eps
 
 from rewave.callbacks.notebook_plot import LivePlotNotebook
 
+from rewave.environment.normalized_box import NormalizedBox
+
 BATCH_SIZE = 30
 WINDOW_LENGTH = 20
 BUFFER_BIAS_RATIO = 1e-5
@@ -184,7 +186,12 @@ class DataSrc(object):
         y = M[ :, -1, 0] / M[ 0, None, -2, 0]
 
         # @TODO put in return
-        open_history = self.open_history[:, self.step:self.step +1].reshape((self.open_history.shape[0],))
+        open_history = []
+        try:
+            open_history = self.open_history[:, self.step:self.step + 1].reshape((self.open_history.shape[0],))
+        except ValueError:
+            print("ValueError for step ", self.step)
+        #open_history = self.open_history[:, self.step:self.step +1].reshape((self.open_history.shape[0],))
         #history = self.history[:, self.step:self.step + self.window_length +1].copy()
 
         self.step += 1
@@ -379,7 +386,7 @@ class PortfolioSim(object):
         # (eq22) immediate reward is log rate of return scaled by episode length
         # @TODO verify that we need to divide or not
         #reward = r1 / self.batch_size
-        reward = r1 *1e4
+        reward = r1
 
         # remember for next step
         self.w0 = w1
@@ -393,6 +400,7 @@ class PortfolioSim(object):
             "mu": mu,
             "reward": reward,
             "log_return": r1,
+            "y_return": y1.mean(),
             "portfolio_value": p1,
             "portfolio_change": portfolio_change,
             "market_return": y1.mean(),
@@ -509,7 +517,7 @@ class PortfolioEnv(gym.Env):
         # openai gym attributes
         # action will be the portfolio weights [cash_bias,w1,w2...] where wn are [0, 1] for each asset
         nb_assets = len(self.src.asset_names)
-        self.action_space = gym.spaces.Box(
+        self.action_space = NormalizedBox(
             0.0, 1.0, shape=(nb_assets,), dtype = np.float32 )
 
         # get the history space from the data min and max
@@ -552,6 +560,13 @@ class PortfolioEnv(gym.Env):
                            features_list=self.features_list,
                            scale=self.scale, window_length=self.window_length)
 
+    def df_info(self):
+        df_info = pd.DataFrame(self.infos)
+        #df_info.index = pd.to_datetime(df_info["date"], unit='s')
+        df_info.index = pd.to_datetime(df_info["date"])
+        return df_info
+
+
     def step(self, action):
         """
         Step the env.
@@ -567,7 +582,13 @@ class PortfolioEnv(gym.Env):
 
         # Sanity checks
         assert self.action_space.contains(
-            action), 'action should be within %r but is %r' % (self.action_space, action)
+            weights), 'action should be within %r but is %r with shape %r' % (self.action_space, action, action.shape)
+
+        # CHANGE
+        if np.sum(weights) == 0.0:
+            print("ERROR weight are null!!!")
+            weights = np.array([1.0] + [0.0] * len(self.tickers_list))
+
         np.testing.assert_almost_equal(
             np.sum(weights), 1.0, decimal=3, err_msg='weights should sum to 1. action="%s"' % weights)
 
@@ -610,7 +631,7 @@ class PortfolioEnv(gym.Env):
         self.sim.reset()
         self.infos = []
         action = self.sim.w0
-        self._plot = self._plot2 = self._plot3 = None
+        # self._plot = self._plot2 = self._plot3 = None
         observation, reward, done, info = self.step(action)
         return observation
 
@@ -641,22 +662,24 @@ class PortfolioEnv(gym.Env):
             return
 
         df_info = pd.DataFrame(self.infos)
-        df_info.index = pd.to_datetime(df_info["date"], unit='s')
+        #df_info.index = pd.to_datetime(df_info["date"], unit='s')
+        df_info.index = pd.to_datetime(df_info["date"])
         x = df_info.index.to_pydatetime()
 
         # plot prices and performance
         _plot_dir = None
         all_assets = ['cash'] + self.sim.tickers_list
         if not self._plot:
-            colors = [None] * len(all_assets) + ['black']
+            colors = [None] * len(all_assets) + ['black', 'grey']
             self._plot_dir = os.path.join(
                 self.log_dir, 'notebook_plot_prices_' + str(time.time())) if self.log_dir else None
             self._plot = LivePlotNotebook(
-                log_dir=self._plot_dir, title='prices & performance', labels=all_assets + ["Portfolio"], ylabel='value', colors=colors)
+                log_dir=self._plot_dir, title='prices & performance', labels=all_assets + ["Portfolio"] + ["Y_return"], ylabel='value', colors=colors)
         y_portfolio = df_info["portfolio_value"]
+        y_return = df_info["y_return"].cumprod()
         y_assets = [df_info['price_' + name].cumprod()
                     for name in all_assets]
-        self._plot.update(x, y_assets + [y_portfolio])
+        self._plot.update(x, y_assets + [y_portfolio]+ [y_return], max=100)
 
 
         # plot portfolio weights
@@ -667,7 +690,7 @@ class PortfolioEnv(gym.Env):
                 log_dir=self._plot_dir2, labels=all_assets, title='weights', ylabel='weight')
         ys = [df_info['weight_' + name] for name in all_assets]
 
-        self._plot2.update(x, ys)
+        self._plot2.update(x, ys, max=100)
 
 
         # plot portfolio costs
@@ -678,7 +701,7 @@ class PortfolioEnv(gym.Env):
                 log_dir=self._plot_dir3, labels=['cost'], title='Commissions', ylabel='cost')
         ys = [df_info['cost'].cumsum()]
         ys = [(1-df_info['mu']).cumsum()]
-        self._plot3.update(x, ys)
+        self._plot3.update(x, ys, max=100)
 
 
         if close:

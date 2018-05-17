@@ -37,6 +37,9 @@ from rewave.constants import eps
 
 from rewave.callbacks.notebook_plot import LivePlotNotebook
 
+from rewave.environment.normalized_box import NormalizedBox
+
+
 BATCH_SIZE = 30
 WINDOW_LENGTH = 20
 BUFFER_BIAS_RATIO = 1e-5
@@ -185,12 +188,16 @@ class DataSrc(object):
         y = M[ :, -1, 0] / M[ 0, None, -2, 0]
 
         # @TODO put in return
-        open_history = self.open_history[:, self.step:self.step +1].reshape((self.open_history.shape[0],))
+        open_history =[]
+        try:
+            open_history = self.open_history[:, self.step:self.step +1].reshape((self.open_history.shape[0],))
+        except ValueError:
+            print("ValueError for step ", self.step)
         #history = self.history[:, self.step:self.step + self.window_length +1].copy()
 
         self.step += 1
 
-        done = bool(self.step >= self.batch[-1])
+        done = bool(self.step >= self.batch[-1] -1)
 
         return X, y, last_w, setw, open_history, done
 
@@ -296,6 +303,8 @@ class PortfolioSim(object):
         @:param w0: rebalanced last period portfolio vector, first element is cash
         @:param commission_rate: rate of commission fee, proportional to the transaction cost
         """
+        if commission_rate != 0.0:
+            print("COMMISSION RATE :", commission_rate)
         mu0 = 1
         mu1 = 1 - 2 * commission_rate + commission_rate ** 2
         while abs(mu1 - mu0) > DELTA_MU:
@@ -397,6 +406,7 @@ class PortfolioSim(object):
             "mu": mu,
             "reward": reward,
             "log_return": r1,
+            "y_return":y1.mean(),
             "portfolio_value": p1,
             "portfolio_change": portfolio_change,
             "market_return": y1.mean(),
@@ -513,8 +523,8 @@ class DiscretePortfolioEnv(gym.Env):
         # openai gym attributes
         # action will be the portfolio weights [cash_bias,w1,w2...] where wn are [0, 1] for each asset
         nb_assets = len(self.src.asset_names)
-        self.action_space = gym.spaces.Box(
-            0, NB_ACTIONS, shape=(nb_assets,), dtype = np.int8 )
+        self.action_space = gym.spaces.NormalizedBox(
+            0, NB_ACTIONS, shape=(nb_assets,), dtype = np.float32 )
 
         # get the history space from the data min and max
         if output_mode == 'EIIE':
@@ -645,22 +655,23 @@ class DiscretePortfolioEnv(gym.Env):
             return
 
         df_info = pd.DataFrame(self.infos)
-        df_info.index = pd.to_datetime(df_info["date"], unit='s')
+        #df_info.index = pd.to_datetime(df_info["date"], unit='s')
         x = df_info.index.to_pydatetime()
 
         # plot prices and performance
         _plot_dir = None
         all_assets = ['cash'] + self.sim.tickers_list
         if not self._plot:
-            colors = [None] * len(all_assets) + ['black']
+            colors = [None] * len(all_assets) + ['black', 'grey']
             self._plot_dir = os.path.join(
                 self.log_dir, 'notebook_plot_prices_' + str(time.time())) if self.log_dir else None
             self._plot = LivePlotNotebook(
                 log_dir=self._plot_dir, title='prices & performance', labels=all_assets + ["Portfolio"], ylabel='value', colors=colors)
         y_portfolio = df_info["portfolio_value"]
+        y_return = df_info["y_return"]
         y_assets = [df_info['price_' + name].cumprod()
                     for name in all_assets]
-        self._plot.update(x, y_assets + [y_portfolio])
+        self._plot.update(x, y_assets + [y_portfolio, y_return])
 
 
         # plot portfolio weights
@@ -671,7 +682,7 @@ class DiscretePortfolioEnv(gym.Env):
                 log_dir=self._plot_dir2, labels=all_assets, title='weights', ylabel='weight')
         ys = [df_info['weight_' + name] for name in all_assets]
 
-        self._plot2.update(x, ys)
+        self._plot2.update(x, ys, max=100)
 
 
         # plot portfolio costs
@@ -682,7 +693,7 @@ class DiscretePortfolioEnv(gym.Env):
                 log_dir=self._plot_dir3, labels=['cost'], title='Commissions', ylabel='cost')
         ys = [df_info['cost'].cumsum()]
         ys = [(1-df_info['mu']).cumsum()]
-        self._plot3.update(x, ys)
+        self._plot3.update(x, ys, max=100)
 
 
         if close:
