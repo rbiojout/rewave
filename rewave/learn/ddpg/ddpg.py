@@ -30,8 +30,8 @@ class DDPG(object):
     def __init__(self, env, sess, actor, critic, actor_noise, obs_normalizer=None, action_processor=None,
                  model_save_path='weights/ddpg/ddpg.ckpt', summary_path='results/ddpg/'):
         self.config = {
-              "episode": 1,
-              "max step": 1000,
+              "episode": 100, #100
+              "max step": 1000, #1000
               "buffer size": 100000,
               "batch size": 64,
               "tau": 0.001,

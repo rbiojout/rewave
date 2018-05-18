@@ -37,181 +37,6 @@ from collections import deque
 DEBUG = True
 
 
-class ActorCritic:
-    def __init__(self, env, sess, learning_rate = 0.001, epsilon = 1.0, epsilon_decay = .995, gamma = .05, tau = .125):
-        self.env = env
-        self.sess = sess
-
-        self.learning_rate = learning_rate
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.gamma = gamma
-        self.tau = tau
-
-        # ===================================================================== #
-        #                               Actor Model                             #
-        # Chain rule: find the gradient of chaging the actor network params in  #
-        # getting closest to the final value network predictions, i.e. de/dA    #
-        # Calculate de/dA as = de/dC * dC/dA, where e is error, C critic, A act #
-        # ===================================================================== #
-
-        self.memory = deque(maxlen=2000)
-        self.actor_state_input, self.actor_model = self.create_actor_model()
-        _, self.target_actor_model = self.create_actor_model()
-
-        self.actor_critic_grad = tf.placeholder(tf.float32,
-                                                [None, self.env.action_space.shape[
-                                                    0]])  # where we will feed de/dC (from critic)
-
-        actor_model_weights = self.actor_model.trainable_weights
-        self.actor_grads = tf.gradients(self.actor_model.output,
-                                        actor_model_weights, -self.actor_critic_grad)  # dC/dA (from actor)
-        grads = zip(self.actor_grads, actor_model_weights)
-        self.optimize = tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)
-
-        # ===================================================================== #
-        #                              Critic Model                             #
-        # ===================================================================== #
-
-        self.critic_state_input, self.critic_action_input, \
-        self.critic_model = self.create_critic_model()
-        _, _, self.target_critic_model = self.create_critic_model()
-
-        self.critic_grads = tf.gradients(self.critic_model.output,
-                                         self.critic_action_input)  # where we calcaulte de/dC for feeding above
-
-        # Initialize for later gradient calculations
-        self.sess.run(tf.initialize_all_variables())
-
-    # ========================================================================= #
-    #                              Model Definitions                            #
-    # ========================================================================= #
-
-    def create_actor_model(self):
-        """
-        state_input = Input(shape=self.env.observation_space.spaces['history'].shape)
-        flatten = Flatten()(state_input)
-        h1 = Dense(24, activation='relu')(flatten)
-        h2 = Dense(48, activation='relu')(h1)
-        h3 = Dense(24, activation='relu')(h2)
-        output = Dense(self.env.action_space.shape[0], activation='relu')(h3)
-
-        model = Model(inputs=state_input, outputs=output)
-        """
-
-        state_input = Input(shape=self.env.observation_space.spaces['history'].shape)
-        conv2d_1 = Conv2D(filters=32, kernel_size=(1, 3), input_shape=env.observation_space.spaces['history'].shape,
-                          padding='same',
-                          data_format='channels_last',
-                          activation='tanh')(state_input)
-        conv2D_2 = Conv2D(64, (1, 3), padding='same', activation='tanh')(conv2d_1)
-        maxpool_1 = MaxPooling2D(pool_size=(2, 2), padding='same')(conv2D_2)
-        dropout_1 = Dropout(0.25)(maxpool_1)
-        flatten = Flatten()(dropout_1)
-        dense1 = Dense(128, activation='relu')(flatten)
-        dropout_2 = Dropout(0.25)(dense1)
-        output = Dense(self.env.action_space.shape[0], activation='relu')(dropout_2)
-        model = Model(inputs=state_input, outputs=output)
-
-        if DEBUG:
-            print("ACTOR MODEL :", model.summary())
-        adam = Adam(lr=0.001)
-        model.compile(loss="mse", optimizer=adam)
-        return state_input, model
-
-    def create_critic_model(self):
-        state_input = Input(shape=self.env.observation_space.spaces['history'].shape)
-        flatten = Flatten()(state_input)
-        state_h1 = Dense(24, activation='relu')(flatten)
-        state_h2 = Dense(48)(state_h1)
-
-        action_input = Input(shape=self.env.action_space.shape)
-        action_h1 = Dense(48)(action_input)
-
-        merged = Add()([state_h2, action_h1])
-        merged_h1 = Dense(24, activation='relu')(merged)
-        output = Dense(1, activation='relu')(merged_h1)
-        model = Model(inputs=[state_input, action_input], outputs=output)
-        print("CRITIC MODEL :", model.summary())
-        adam = Adam(lr=0.001)
-        model.compile(loss="mse", optimizer=adam)
-        return state_input, action_input, model
-
-    # ========================================================================= #
-    #                               Model Training                              #
-    # ========================================================================= #
-
-    def remember(self, cur_state, action, reward, new_state, done):
-        self.memory.append([cur_state, action, reward, new_state, done])
-
-    def _train_actor(self, samples):
-        for sample in samples:
-            cur_state, action, reward, new_state, _ = sample
-            predicted_action = self.actor_model.predict(cur_state)
-            grads = self.sess.run(self.critic_grads, feed_dict={
-                self.critic_state_input: cur_state,
-                self.critic_action_input: predicted_action
-            })[0]
-
-            self.sess.run(self.optimize, feed_dict={
-                self.actor_state_input: cur_state,
-                self.actor_critic_grad: grads
-            })
-
-    def _train_critic(self, samples):
-        for sample in samples:
-            cur_state, action, reward, new_state, done = sample
-            if not done:
-                target_action = self.target_actor_model.predict(new_state)
-                future_reward = self.target_critic_model.predict(
-                    [new_state, target_action])[0][0]
-                reward += self.gamma * future_reward
-            self.critic_model.fit([cur_state, action], reward, verbose=0, batch_size=1)
-
-    def train(self):
-        batch_size = 64
-        if len(self.memory) < batch_size:
-            return
-
-        rewards = []
-        samples = random.sample(self.memory, batch_size)
-        self._train_critic(samples)
-        self._train_actor(samples)
-
-    # ========================================================================= #
-    #                         Target Model Updating                             #
-    # ========================================================================= #
-
-    def _update_actor_target(self):
-        weights = self.actor_model.get_weights()
-        target_weights = self.target_actor_model.get_weights()
-        for i in range(len(target_weights)):
-            target_weights[i] = weights[i] * self.tau + target_weights[i] * (1 - self.tau)
-        self.target_actor_model.set_weights(target_weights)
-
-
-    def _update_critic_target(self):
-        weights = self.critic_model.get_weights()
-        target_weights = self.critic_target_model.get_weights()
-        for i in range(len(target_weights)):
-            target_weights[i] = weights[i] * self.tau + target_weights[i] * (1 - self.tau)
-        self.critic_target_model.set_weights(target_weights)
-
-
-    def update_target(self):
-        self._update_actor_target()
-        self._update_critic_target()
-
-    # ========================================================================= #
-    #                              Model Predictions                            #
-    # ========================================================================= #
-
-    def act(self, cur_state):
-        self.epsilon *= self.epsilon_decay
-        if np.random.random() < self.epsilon:
-            return self.env.action_space.sample()
-        return self.actor_model.predict(cur_state).reshape((env.action_space.shape[0],))
-
 def obs_normalizer(observation):
     """ Preprocess observation obtained by environment
 
@@ -237,62 +62,6 @@ def obs_reshaper(observation):
     if isinstance(observation, dict):
         observation = observation['history']
     return observation.reshape((1,)+observation.shape)
-
-def mainold():
-    sess = tf.Session()
-    K.set_session(sess)
-
-    start_date = date(2008, 1, 1)
-    end_date = date(2018, 1, 1)
-    features_list = ['open', 'high', 'low', 'close']
-    tickers_list = ['AAPL', 'A']
-
-    batch_size = 200
-
-    env = PortfolioEnv(
-        start_date=start_date,
-        end_date=end_date,
-        features_list=features_list,
-        tickers_list=tickers_list,
-        batch_size=batch_size,
-        scale=True,
-        buffer_bias_ratio=1e-6,
-        trading_cost=0.00,
-        window_length=window_length,
-        output_mode='EIIE',
-    )
-    actor_critic = ActorCritic(env, sess)
-
-    num_trials = 200
-    trial_len = batch_size
-
-    for trial in range(num_trials):
-        print("----------- TRIAL ------- ",trial)
-        cur_state = env.reset()
-        action = env.action_space.sample()
-        for step in range(trial_len):
-            env.render()
-            cur_state = obs_reshaper(cur_state)
-            action = actor_critic.act(cur_state)
-
-            new_state, reward, done, infos = env.step(action)
-            action = action.reshape((1, env.action_space.shape[0]))
-            #print("action shape:", action.shape)
-
-            new_history = obs_reshaper(new_state)
-
-            reward = reward.reshape((1,))
-            actor_critic.remember(cur_state, action, reward, new_history, done)
-            actor_critic.train()
-
-            cur_state = new_state
-            #print("===========================================")
-            if done:
-                print("done with step ", step, " action :", action, " infos date ", infos['date'])
-                cur_state = env.reset()
-                action = env.action_space.sample()
-                break
-
 
 
 def get_model_path(window_length, predictor_type, use_batch_norm):
@@ -347,8 +116,9 @@ def squeeze_first2axes_shape( x4d_shape ) :
 
 
 def model_predictor(inputs, predictor_type, use_batch_norm):
-    window_length = inputs.get_shape()[1]
+    window_length = inputs.get_shape()[2]
     assert predictor_type in ['cnn', 'lstm'], 'type must be either cnn or lstm'
+    assert window_length >= 3, 'window length must be at least 3'
     if predictor_type == 'cnn':
         net = Conv2D(filters=32, kernel_size=(1, 3),
                           padding='same',
@@ -421,8 +191,6 @@ class StockActor(ActorNetwork):
         if root_net == None:
             net = model_predictor(self.inputs, self.predictor_type, self.use_batch_norm)
 
-        print("NET ACTOR 1 ", net)
-
         net = Dense(64, input_dim=64,
                 kernel_regularizer=regularizers.l2(0.01),
                 activity_regularizer=regularizers.l1(0.01))(net)
@@ -440,7 +208,6 @@ class StockActor(ActorNetwork):
 
         # Scale output to -action_bound to action_bound
         scaled_out = tf.multiply(out, self.action_bound)
-        print("NET ACTOR ",net)
         return out, scaled_out
 
     def train(self, inputs, a_gradient):
@@ -612,7 +379,7 @@ if __name__ == '__main__':
     start_date = date(2008, 1, 1)
     end_date = date(2018, 1, 1)
     features_list = ['open', 'high', 'low', 'close']
-    tickers_list = ['AAPL', 'A']
+    tickers_list = ['AAPL','ATVI','CMCSA','COST','CSX','DISH','EA','EBAY','FB','GOOGL','HAS','ILMN','INTC','MAR','REGN','SBUX']
 
     historyManager = gdm.HistoryManager(tickers=tickers_list, online=True)
     df = historyManager.historical_data(start=start_date, end=end_date, tickers=tickers_list,
