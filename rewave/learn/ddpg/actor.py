@@ -6,6 +6,8 @@ Author: Patrick Emami, Modified by Chi Zhang
 
 import tensorflow as tf
 
+from tensorflow.python.keras.models import Model
+
 
 # ===========================
 #   Actor DNNs
@@ -19,7 +21,7 @@ class ActorNetwork(object):
     between -action_bound and action_bound
     """
 
-    def __init__(self, sess, state_dim, action_dim, action_bound, learning_rate, tau, batch_size):
+    def __init__(self, sess, root_net, inputs, state_dim, action_dim, action_bound, learning_rate, tau, batch_size):
         """
 
         Args:
@@ -41,23 +43,30 @@ class ActorNetwork(object):
         self.tau = tau
         self.batch_size = batch_size
 
+        print("root_net ", root_net)
+
+        # Input
+        self.inputs = inputs
+        self.target_inputs = inputs
+
         # Actor Network
-        self.inputs, self.out, self.scaled_out = self.create_actor_network()
+        self.out, self.scaled_out = self.create_actor_network(root_net=root_net)
+        self.actor_model = Model(inputs=inputs, outputs=self.out)
 
         self.network_params = tf.trainable_variables()
 
         # Target Network
-        self.target_inputs, self.target_out, self.target_scaled_out = self.create_actor_network()
+        self.target_out, self.target_scaled_out = self.create_actor_network(root_net=None)
+        self.target_actor_model = Model(inputs=self.target_inputs, outputs=self.target_out)
 
-        self.target_network_params = tf.trainable_variables()[
-                                     len(self.network_params):]
+        #self.target_network_params = tf.trainable_variables()[len(self.network_params):]
 
         # Op for periodically updating target network with online network
         # weights
-        self.update_target_network_params = \
-            [self.target_network_params[i].assign(tf.multiply(self.network_params[i], self.tau) +
-                                                  tf.multiply(self.target_network_params[i], 1. - self.tau))
-             for i in range(len(self.target_network_params))]
+        #self.update_target_network_params = \
+        #    [self.target_network_params[i].assign(tf.multiply(self.network_params[i], self.tau) +
+        #                                          tf.multiply(self.target_network_params[i], 1. - self.tau))
+        #     for i in range(len(self.target_network_params))]
 
         # This gradient will be provided by the critic network
         self.action_gradient = tf.placeholder(tf.float32, [None] + self.a_dim)
@@ -65,15 +74,16 @@ class ActorNetwork(object):
         # Combine the gradients here
         self.unnormalized_actor_gradients = tf.gradients(
             self.scaled_out, self.network_params, -self.action_gradient)
+
         self.actor_gradients = list(map(lambda x: tf.div(x, self.batch_size), self.unnormalized_actor_gradients))
 
         # Optimization Op
         self.optimize = tf.train.AdamOptimizer(self.learning_rate). \
             apply_gradients(zip(self.actor_gradients, self.network_params))
 
-        self.num_trainable_vars = len(self.network_params) + len(self.target_network_params)
+        #self.num_trainable_vars = len(self.network_params) + len(self.target_network_params)
 
-    def create_actor_network(self):
+    def create_actor_network(self, root_net):
         raise NotImplementedError('Create actor should return (inputs, out, scaled_out)')
 
     def train(self, inputs, a_gradient):
@@ -93,7 +103,5 @@ class ActorNetwork(object):
         })
 
     def update_target_network(self):
-        self.sess.run(self.update_target_network_params)
-
-    def get_num_trainable_vars(self):
-        return self.num_trainable_vars
+        # self.sess.run(self.update_target_network_params)
+        self.target_actor_model.set_weights(self.actor_model.get_weights())

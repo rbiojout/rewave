@@ -15,7 +15,7 @@ from rewave.tools.data import normalize, prepare_dataframe
 
 from tensorflow.python.keras.models import Sequential, Model
 from tensorflow.python.keras.layers import Dense, Dropout, Input, Flatten, Conv2D, MaxPooling2D, BatchNormalization, Activation, Reshape, LSTM
-from tensorflow.python.keras.layers import Add, Multiply
+from tensorflow.python.keras.layers import Add, Multiply, Lambda
 from tensorflow.python.keras.optimizers import Adam
 from keras.initializers import RandomUniform
 from keras import regularizers
@@ -319,6 +319,32 @@ def get_variable_scope(window_length, predictor_type, use_batch_norm):
     return '{}_window_{}_{}'.format(predictor_type, window_length, batch_norm_str)
 
 
+def squeeze_middle2axes_operator( x4d ) :
+    shape = x4d.shape # get dynamic tensor shape
+    x3d = tf.reshape( x4d, [-1, shape[1].value * shape[2].value, shape[3].value ] )
+    return x3d
+
+def squeeze_middle2axes_shape( x4d_shape ) :
+    in_batch, in_rows, in_cols, in_filters = x4d_shape
+    if ( None in [ in_rows, in_cols] ) :
+        output_shape = ( in_batch, None, in_filters )
+    else :
+        output_shape = ( in_batch, in_rows * in_cols, in_filters )
+    return output_shape
+
+def squeeze_first2axes_operator( x4d ) :
+    shape = x4d.shape # get dynamic tensor shape
+    x3d = tf.reshape( x4d, [shape[1].value * shape[1].value, shape[2].value, shape[3].value ] )
+    return x3d
+
+def squeeze_first2axes_shape( x4d_shape ) :
+    in_batch, in_rows, in_cols, in_filters = x4d_shape
+    if ( in_batch == None ) :
+        output_shape = ( None, in_cols, in_filters )
+    else :
+        output_shape = ( in_batch*in_rows, in_cols, in_filters )
+    return output_shape
+
 
 def model_predictor(inputs, predictor_type, use_batch_norm):
     window_length = inputs.get_shape()[1]
@@ -343,17 +369,27 @@ def model_predictor(inputs, predictor_type, use_batch_norm):
             print('Output:', net.shape)
     elif predictor_type == 'lstm':
         num_stocks = inputs.get_shape()[1]
+        window_length = inputs.get_shape()[2]
+        features = inputs.get_shape()[3]
+
         hidden_dim = 32
-        net = Reshape((-1, window_length, 1))(inputs)
+        if DEBUG:
+            print('Shape input:', inputs.shape)
+        #net = Lambda(squeeze_middle2axes_operator, output_shape=squeeze_middle2axes_shape)(inputs)
+        #net = Lambda(squeeze_first2axes_operator, output_shape=squeeze_first2axes_shape)(inputs)
+
+        #net = Reshape((window_length, features))(inputs)
+        net = Reshape((window_length, num_stocks*features))(inputs)
+
+        #net = tf.squeeze(inputs, axis=0)
+        # reorder
+        #net = tf.transpose(net, [1, 0, 2])
         if DEBUG:
             print('Reshaped input:', net.shape)
         net = LSTM(hidden_dim)(net)
         if DEBUG:
             print('After LSTM:', net.shape)
-        net = Reshape((-1, num_stocks, hidden_dim))(inputs)
-        if DEBUG:
-            print('After reshape:', net.shape)
-        net = Flatten()(net)
+        #net = Reshape((num_stocks, hidden_dim))(inputs)
         if DEBUG:
             print('Output:', net.shape)
     else:
@@ -362,22 +398,29 @@ def model_predictor(inputs, predictor_type, use_batch_norm):
     return net
 
 class StockActor(ActorNetwork):
-    def __init__(self, sess, state_dim, action_dim, action_bound, learning_rate, tau, batch_size,
+    def __init__(self, sess, root_net, inputs, state_dim, action_dim, action_bound, learning_rate, tau, batch_size,
                  predictor_type, use_batch_norm):
+        self.root_net = root_net
+        self.inputs = inputs
         self.predictor_type = predictor_type
         self.use_batch_norm = use_batch_norm
-        ActorNetwork.__init__(self, sess, state_dim, action_dim, action_bound, learning_rate, tau, batch_size)
+        ActorNetwork.__init__(self, sess, root_net, inputs, state_dim, action_dim, action_bound, learning_rate, tau, batch_size)
 
-    def create_actor_network(self):
+    def create_actor_network(self, root_net=None):
         """
         self.s_dim: a list specifies shape
         """
+
         nb_classes, window_length = self.s_dim
         assert nb_classes == self.a_dim[0]
         assert window_length > 2, 'This architecture only support window length larger than 2.'
-        inputs = Input(shape=(self.s_dim + [1]), name="input")
+        #inputs = Input(shape=(self.s_dim + [1]), name="input")
 
-        net = model_predictor(inputs, self.predictor_type, self.use_batch_norm)
+        net = root_net
+
+        if root_net == None:
+            net = model_predictor(self.inputs, self.predictor_type, self.use_batch_norm)
+
         print("NET ACTOR 1 ", net)
 
         net = Dense(64, input_dim=64,
@@ -385,14 +428,12 @@ class StockActor(ActorNetwork):
                 activity_regularizer=regularizers.l1(0.01))(net)
         if self.use_batch_norm:
             net = BatchNormalization()(net)
-        # net = tflearn.layers.normalization.batch_normalization(net)
         net = Activation("relu")(net)
         net = Dense(64, input_dim=64,
                 kernel_regularizer=regularizers.l2(0.01),
                 activity_regularizer=regularizers.l1(0.01))(net)
         if self.use_batch_norm:
             net = BatchNormalization()(net)
-        # net = tflearn.layers.normalization.batch_normalization(net)
         net = Activation("relu")(net)
         # Final layer weights are init to Uniform[-3e-3, 3e-3]
         out = Dense(self.a_dim[0], kernel_initializer="random_uniform", activation='softmax', name="actor_out")(net)
@@ -400,7 +441,7 @@ class StockActor(ActorNetwork):
         # Scale output to -action_bound to action_bound
         scaled_out = tf.multiply(out, self.action_bound)
         print("NET ACTOR ",net)
-        return inputs, out, scaled_out
+        return out, scaled_out
 
     def train(self, inputs, a_gradient):
         window_length = self.s_dim[1]
@@ -426,22 +467,44 @@ class StockActor(ActorNetwork):
 
 
 class StockCritic(CriticNetwork):
-    def __init__(self, sess, state_dim, action_dim, learning_rate, tau, num_actor_vars,
+    def __init__(self, sess, root_net, inputs, state_dim, action_dim, learning_rate, tau,
                  predictor_type, use_batch_norm):
+        self.root_net = root_net
+        self.inputs = inputs
         self.predictor_type = predictor_type
         self.use_batch_norm = use_batch_norm
-        CriticNetwork.__init__(self, sess, state_dim, action_dim, learning_rate, tau, num_actor_vars)
+        CriticNetwork.__init__(self, sess, root_net, inputs, state_dim, action_dim, learning_rate, tau)
 
-    def create_critic_network(self, net=None):
-        inputs = Input(shape=(self.s_dim + [1]))
+    def create_critic_network(self, root_net=None):
+        #inputs = Input(shape=(self.s_dim + [1]))
         action = Input(self.a_dim)
 
-        net = model_predictor(inputs, self.predictor_type, self.use_batch_norm)
+        net = root_net
+
+        if root_net == None:
+            net = model_predictor(self.inputs, self.predictor_type, self.use_batch_norm)
 
         # Add the action tensor in the 2nd hidden layer
         # Use two temp layers to get the corresponding weights and biases
-        t1 = Dense(64)(net)
-        t2 = Dense(64)(action)
+        t1 = Dense(64, activation="relu")(net)
+        t2 = Dense(64, activation="relu")(action)
+
+        """
+        t1 = Dense(64, input_dim=64,
+                kernel_regularizer=regularizers.l2(0.01),
+                activity_regularizer=regularizers.l1(0.01))(net)
+        if self.use_batch_norm:
+            t1 = BatchNormalization()(t1)
+        t1 = Activation("relu")(t1)
+
+        t2 = Dense(64, input_dim=64,
+                kernel_regularizer=regularizers.l2(0.01),
+                activity_regularizer=regularizers.l1(0.01))(action)
+        if self.use_batch_norm:
+            t2 = BatchNormalization()(t2)
+        t2 = Activation("relu")(t2)
+        """
+
 
         net = Add()([t1, t2])
         if self.use_batch_norm:
@@ -452,7 +515,7 @@ class StockCritic(CriticNetwork):
         # Weights are init to Uniform[-3e-3, 3e-3]
         out = Dense(1, kernel_initializer="random_uniform",
                     activation='softmax', name="critic_out")(net)
-        return inputs, action, out
+        return action, out
 
     def train(self, inputs, action, predicted_q_value):
         window_length = self.s_dim[1]
@@ -596,11 +659,15 @@ if __name__ == '__main__':
     with tf.variable_scope(variable_scope):
         sess = tf.Session()
 
-        actor = StockActor(sess=sess, state_dim=state_dim, action_dim=action_dim, action_bound=action_bound,
+        root_net = None
+        state_inputs = Input(shape=([nb_classes, window_length] + [1]))
+        root_net = model_predictor(state_inputs, predictor_type, use_batch_norm)
+
+        actor = StockActor(sess=sess, root_net=root_net, inputs=state_inputs, state_dim=state_dim, action_dim=action_dim, action_bound=action_bound,
                             learning_rate=1e-4, tau=tau, batch_size=batch_size,
                             predictor_type=predictor_type, use_batch_norm=use_batch_norm)
-        critic = StockCritic(sess=sess, state_dim=state_dim, action_dim=action_dim, tau=1e-3,
-                             learning_rate=1e-3, num_actor_vars=actor.get_num_trainable_vars(),
+        critic = StockCritic(sess=sess, root_net=root_net, inputs=state_inputs, state_dim=state_dim, action_dim=action_dim, tau=1e-3,
+                             learning_rate=1e-3,
                              predictor_type=predictor_type, use_batch_norm=use_batch_norm)
         ddpg_model = DDPG(env=env, sess=sess, actor=actor, critic=critic, actor_noise=actor_noise,
                           obs_normalizer=obs_normalizer,
