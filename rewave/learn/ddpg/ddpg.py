@@ -54,6 +54,7 @@ class DDPG(object):
         self.critic = critic
         #tf.summary.histogram("critic_weights", critic.out)
         self.actor_noise = actor_noise
+        # String for the name of observation in case of several names
         self.obs_normalizer = obs_normalizer
         self.action_processor = action_processor
         self.summary_ops, self.summary_vars = build_summaries()
@@ -111,7 +112,7 @@ class DDPG(object):
 
             previous_observation = self.env.reset()
             if self.obs_normalizer:
-                previous_observation = self.obs_normalizer(previous_observation)
+                previous_observation = previous_observation[self.obs_normalizer]
 
             ep_reward = 0
             ep_ave_max_q = 0
@@ -129,7 +130,7 @@ class DDPG(object):
                 observation, reward, done, _ = self.env.step(action_take)
 
                 if self.obs_normalizer:
-                    observation = self.obs_normalizer(observation)
+                    observation = observation[self.obs_normalizer]
 
                 # add to buffer
                 self.buffer.add(previous_observation, action, reward, done, observation)

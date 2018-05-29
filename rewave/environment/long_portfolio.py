@@ -162,12 +162,12 @@ class DataSrc(object):
         # batch of indexes
         # initialized with reset
         self.batch = []
-        self.step = 0
+        self.current_step = 0
 
         self.reset()
 
 
-    def _step(self):
+    def step(self):
         """
         @:return: the next batch of training sample. The sample is a dictionary
         with key "X"(input data); "y"(future relative price); "last_w" a numpy array
@@ -175,12 +175,12 @@ class DataSrc(object):
         batch_size
         """
 
-        last_w = self.PVM.values[self.step - 1, :]
+        last_w = self.PVM.values[self.current_step - 1, :]
 
         def setw(w):
-            self.PVM.iloc[self.step, :] = w
+            self.PVM.iloc[self.current_step, :] = w
 
-        M = self.get_submatrix(self.step)
+        M = self.get_submatrix(self.current_step)
         M = np.array(M)
         X = M[ :, :-1, :]
         y = M[ :, -1, 0] / M[ 0, None, -2, 0]
@@ -188,15 +188,15 @@ class DataSrc(object):
         # @TODO put in return
         open_history = []
         try:
-            open_history = self.open_history[:, self.step:self.step + 1].reshape((self.open_history.shape[0],))
+            open_history = self.open_history[:, self.current_step:self.current_step + 1].reshape((self.open_history.shape[0],))
         except ValueError:
-            print("ValueError for step ", self.step)
+            print("ValueError for current_step ", self.current_step)
         #open_history = self.open_history[:, self.step:self.step +1].reshape((self.open_history.shape[0],))
         #history = self.history[:, self.step:self.step + self.window_length +1].copy()
 
-        self.step += 1
+        self.current_step += 1
 
-        done = bool(self.step >= self.batch[-1])
+        done = bool(self.current_step >= self.batch[-1])
 
         return X, y, last_w, setw, open_history, done
 
@@ -263,6 +263,8 @@ class DataSrc(object):
 
         return history, y1, done
         """
+    def full_history(self):
+        return [self.get_submatrix(indice) for indice in self.indices]
 
     def reset(self):
         # reset the memory
@@ -270,7 +272,7 @@ class DataSrc(object):
         self.PVM = self.PVM.fillna(1.0 / len(self.asset_names))
 
         self.batch = [exp.state_index for exp in self._replay_buffer.next_experience_batch()]
-        self.step = self.batch[0]
+        self.current_step = self.batch[0]
 
 class PortfolioSim(object):
     """
@@ -309,7 +311,7 @@ class PortfolioSim(object):
                   (1 - commission_rate * w1[0])
         return mu1
 
-    def _step(self, w1, y1):
+    def step(self, w1, y1):
         """
         Step.
         w0 - last action of portfolio weights
@@ -386,7 +388,27 @@ class PortfolioSim(object):
         # (eq22) immediate reward is log rate of return scaled by episode length
         # @TODO verify that we need to divide or not
         #reward = r1 / self.batch_size
-        reward = r1
+        reward = r1 * 1000
+
+        # rescale between -1 and 1
+        y_max = y1.max()
+        y_min = y1.min()
+
+        y_scaled = 1 - 2*(p1/p0-y_max)/(y_min-y_max)
+
+        reward = y_scaled
+
+        """
+        max_y_indices = np.where(y1 == y1.max())
+        max_w_indices = np.where(w1 == w1.max())
+
+        highest_found = len(np.intersect1d(max_y_indices, max_w_indices)) > 0
+        bonus_found = 0.0
+        if highest_found:
+            bonus_found = w1[max_w_indices].sum()
+            print('---found top indice {} with weight {}'.format(max_w_indices,bonus_found))
+        reward = p1 - y1.mean() + bonus_found * 5
+        """
 
         # remember for next step
         self.w0 = w1
@@ -552,6 +574,9 @@ class PortfolioEnv(gym.Env):
         self._plot = self._plot2 = self._plot3 = None
         self.reset()
 
+    def has_complex_state(self):
+        return isinstance(self.observation_space, gym.spaces.Dict) or isinstance(self.observation_space, gym.spaces.Tuple)
+
     def _on_market_data(self, end_date):
         self.end_date = end_date
 
@@ -573,7 +598,7 @@ class PortfolioEnv(gym.Env):
 
         Actions should be portfolio [w0...]
         - Where wn is a portfolio weight between 0 and 1. The first (w0) is cash_bias
-        - cn is the portfolio conversion weights see PortioSim._step for description
+        - cn is the portfolio conversion weights see PortioSim.step for description
         """
         logging.debug('action: %s', action)
 
@@ -593,10 +618,12 @@ class PortfolioEnv(gym.Env):
             np.sum(weights), 1.0, decimal=3, err_msg='weights should sum to 1. action="%s"' % weights)
 
         # data gathered from the history
-        history, y1, last_w, setw, open_history, done1 = self.src._step()
+        history, y1, last_w, setw, open_history, done1 = self.src.step()
+
+        history = history - 1.0
 
         # data gathered from the sim
-        reward, info, done2 = self.sim._step(weights, y1)
+        reward, info, done2 = self.sim.step(weights, y1)
 
         # add shares
         all_assets = ['cash'] + self.sim.tickers_list
@@ -609,8 +636,8 @@ class PortfolioEnv(gym.Env):
         info['market_value'] = np.cumprod(
             [inf["market_return"] for inf in self.infos + [info]])[-1]
         # add dates
-        info['date'] = self.src._times[self.src.step].timestamp()
-        info['steps'] = self.src.step
+        info['date'] = self.src._times[self.src.current_step].timestamp()
+        info['steps'] = self.src.current_step
 
         self.infos.append(info)
 

@@ -43,8 +43,6 @@ class ActorNetwork(object):
         self.tau = tau
         self.batch_size = batch_size
 
-        print("root_net ", root_net)
-
         # Input
         self.inputs = inputs
         self.target_inputs = inputs

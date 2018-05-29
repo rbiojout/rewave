@@ -16,8 +16,8 @@ from rewave.environment import long_portfolio, env_specs
 def test_src_outputs(spec_id):
     """check we arn't giving future prices to model"""
     env = gym.envs.spec(spec_id).make()
-    X0, y0, _, _, _, _ = env.src._step()
-    _, y1, _, _, _, _ = env.src._step()
+    X0, y0, _, _, _, _ = env.src.step()
+    _, y1, _, _, _, _ = env.src.step()
     # so relative price vector for calulating this steps returns is
     # y(t) = y = v(t)/v(t-1)
     # while y(t-1) = y_last =  v(t-1)/v(t-2)
@@ -205,3 +205,10 @@ def test_costs(spec_id):
     obs, reward, done, info = env.step(np.array([0, 0, 1, 0]))
     np.testing.assert_almost_equal(
         info['cost'], 0, err_msg='no trading should cost no commission')
+
+@pytest.mark.parametrize("spec_id", env_specs)
+def test_reset(spec_id):
+    env = gym.envs.spec(spec_id).make()
+    obs1 = env.reset()
+    obs2 = env.reset()
+    assert not np.array_equal(obs1['history'], obs2['history'])

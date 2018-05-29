@@ -62,26 +62,26 @@ class TestDataSrc(unittest.TestCase):
         self.assertEqual(1.0 / len(asset_names), PVM.iloc[0, 0], "initialization should be uniform")
         self.assertEqual(1.0, PVM.iloc[0,:].sum(), "weights should sum to 1")
         self.assertEqual(1.0, PVM.iloc[:, :].sum().sum()/PVM.shape[0], "weights should sum to 1")
-        self.assertEqual(src.step, src.batch[0], "first index is begining of batch")
-        self.assertGreaterEqual(src.step, 0, "batch must start with step greater or equal to 0")
+        self.assertEqual(src.current_step, src.batch[0], "first index is begining of batch")
+        self.assertGreaterEqual(src.current_step, 0, "batch must start with step greater or equal to 0")
         self.assertEqual(src.batch_size, src.batch[-1] - src.batch[0] +1 , "batch size is not correct")
 
 
     def test_step(self):
-        initial_step= self.src.step
-        X, y, last_w, setw, open_history, done = self.src._step()
+        initial_step= self.src.current_step
+        X, y, last_w, setw, open_history, done = self.src.step()
         self.assertEqual(False, done, "batch should continue")
-        next_step = self.src.step
+        next_step = self.src.current_step
         self.assertEqual(1, next_step - initial_step, "step must grow by 1")
         self.assertEqual(len(self.src.asset_names), X.shape[0], "X shape 0: dimension must be assets length")
         self.assertEqual(self.src.window_length, X.shape[1], "X shape 1: time sequence length must be window_length")
         self.assertEqual(len(self.src.features), X.shape[2], "X shape 2: dimension must be features length")
         self.assertEqual((len(self.src.asset_names),), y.shape, "y shape: dimension must be assets length")
         self.src.reset()
-        initial_step = self.src.step
+        initial_step = self.src.current_step
         for i in range(0, self.src.batch_size-1):
-            X, y, last_w, setw, open_history, done = self.src._step()
-        self.assertEqual(initial_step + self.src.batch_size - 1, self.src.step, "step must end at batch_size -1")
+            X, y, last_w, setw, open_history, done = self.src.step()
+        self.assertEqual(initial_step + self.src.batch_size - 1, self.src.current_step, "step must end at batch_size -1")
         self.assertEqual(True, done, "batch should finish")
 
     def test_keep_last(self):
@@ -96,6 +96,6 @@ class TestDataSrc(unittest.TestCase):
                            buffer_bias_ratio=self.buffer_bias_ratio,
                            window_length=self.window_length, is_permed=self.is_permed)
         src.reset()
-        self.assertEqual(0, src.step, "step equal zero in reset")
-        src._step()
-        self.assertEqual(1, src.step, "step start at one")
+        self.assertEqual(0, src.current_step, "step equal zero in reset")
+        src.step()
+        self.assertEqual(1, src.current_step, "step start at one")

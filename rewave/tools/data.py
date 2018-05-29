@@ -136,6 +136,28 @@ def prepare_dataframe(df):
     # order assets, time, features
     return np.transpose(data, (1, 0, 2))
 
+def _pack_samples(self, tensor3D):
+    """
+    take a 3D tensor compose of assets, window_time, features
+    and return a 3D tensor with the differences
+    return the elements for the indexs
+    :param indexs: indexs from which we extract
+    :return: inputs, outputs, control functions
+    """
+    tensor3D[:,:,:]/tensor3D[:,:,:].shift(1)
+
+    indexs = np.array(indexs)
+
+    last_w = self.PVM.values[indexs-1, :]
+
+    def setw(w):
+        self.PVM.iloc[indexs, :] = w
+    M = [self.get_submatrix(index) for index in indexs]
+    M = np.array(M)
+    X = M[:, :, :-1, :]
+    y = M[:, :, -1, :] / M[:, 0, None, -2, :]
+
+    return {"X": X, "y": y, "last_w": last_w, "setw": setw}
 
 def get_chart_until_success(polo, pair, start, period, end):
     is_connect_success = False
@@ -274,8 +296,31 @@ def date_to_index(date_string):
     """
     return (datetime.datetime.strptime(date_string, date_format) - start_datetime).days
 
+def create_optimal_imitation_dataset(history, training_data_ratio=0.8):
+    """
 
-def create_optimal_imitation_dataset(history, training_data_ratio=0.8, is_normalize=True):
+    :param history: a list of frames with dimension nb_assets, window_length, features
+    :param training_data_ratio: split ration
+    :return: dataset for further work
+    """
+    nb_samples = len(history)
+    Xs = []
+    Ys = []
+    for i in range(nb_samples):
+        frame = history[i]
+        obs = frame[:, :-1, :]
+        label = np.zeros(dtype=np.float32, shape=(frame.shape[0],))
+        max_index = np.argmax(frame[:, -1, 0], axis=0)
+        label[max_index] = 1.0
+        Xs.append(obs)
+        Ys.append(label)
+    Xs = np.stack(Xs, axis=0)
+    Ys = np.stack(Ys, axis=0)
+    num_training_sample = int(nb_samples * training_data_ratio)
+    return (Xs[:num_training_sample], Ys[:num_training_sample]), \
+           (Xs[num_training_sample:], Ys[num_training_sample:])
+
+def create_optimal_imitation_dataset_old(history, training_data_ratio=0.8, is_normalize=True):
     """ Create dataset for imitation optimal action given future observations
 
     Args:
@@ -297,8 +342,29 @@ def create_optimal_imitation_dataset(history, training_data_ratio=0.8, is_normal
     return (close_open_ratio[:num_training_sample], labels[:num_training_sample]), \
            (close_open_ratio[num_training_sample:], labels[num_training_sample:])
 
+def create_imitation_dataset(history, training_data_ratio=0.8):
+    """
 
-def create_imitation_dataset(history, window_length, training_data_ratio=0.8, is_normalize=True):
+    :param history: a list of frames with dimension nb_assets, window_length, features
+    :param training_data_ratio: split ration
+    :return: dataset for further work
+    """
+    nb_samples = len(history)
+    Xs = []
+    Ys = []
+    for i in range(nb_samples):
+        frame = history[i]
+        obs = frame[:, :-1, :]
+        label = np.argmax(frame[:, -1, 0], axis=0)
+        Xs.append(obs)
+        Ys.append(label)
+    Xs = np.stack(Xs)
+    Ys = np.concatenate(Ys)
+    num_training_sample = int(nb_samples * training_data_ratio)
+    return (Xs[:num_training_sample], Ys[:num_training_sample]), \
+           (Xs[num_training_sample:], Ys[num_training_sample:])
+
+def create_imitation_dataset_old(history, window_length, training_data_ratio=0.8, is_normalize=True):
     """ Create dataset for imitation optimal action given past observations
 
     Args:

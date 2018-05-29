@@ -143,13 +143,18 @@ def model_predictor(inputs, predictor_type, use_batch_norm):
         features = inputs.get_shape()[3]
 
         hidden_dim = 32
+
         if DEBUG:
             print('Shape input:', inputs.shape)
         #net = Lambda(squeeze_middle2axes_operator, output_shape=squeeze_middle2axes_shape)(inputs)
         #net = Lambda(squeeze_first2axes_operator, output_shape=squeeze_first2axes_shape)(inputs)
 
+        net = Lambda(lambda x: tf.transpose(x, [0, 2, 1, 3]))(inputs)
+        if DEBUG:
+            print('Shape input after transpose:', net.shape)
+
         #net = Reshape((window_length, features))(inputs)
-        net = Reshape((window_length, num_stocks*features))(inputs)
+        net = Reshape((window_length, num_stocks*features))(net)
 
         #net = tf.squeeze(inputs, axis=0)
         # reorder
@@ -337,6 +342,24 @@ def obs_normalizer(observation):
     return observation
 
 
+def obs_normalizer_full(observation):
+    """ Preprocess observation obtained by environment
+
+    Args:
+        observation: (nb_classes, window_length, num_features) or with info
+
+    Returns: normalized
+
+    """
+    if isinstance(observation, tuple):
+        observation = observation[0]
+    if isinstance(observation, dict):
+        observation = observation['history']
+    # directly use close/open ratio as feature
+    observation = observation[:, :, :] / observation[:, :, 0]
+    observation = normalize(observation)
+    return observation
+
 def test_model(env, model):
     observation, info = env.reset()
     done = False
@@ -392,6 +415,7 @@ if __name__ == '__main__':
     num_training_time = 1095
     window_length = int(args['window_length'])
     nb_classes = len(target_stocks) + 1
+    nb_features = len(features_list)
 
     # get target history
     target_history = np.empty(shape=(len(target_stocks), num_training_time, history.shape[2]))
@@ -427,8 +451,11 @@ if __name__ == '__main__':
         sess = tf.Session()
 
         root_net = None
-        state_inputs = Input(shape=([nb_classes, window_length] + [1]))
+        state_inputs = Input(shape=([nb_classes, window_length, nb_features]))
         root_net = model_predictor(state_inputs, predictor_type, use_batch_norm)
+
+        root_model = Model(state_inputs, root_net)
+        tf.summary.histogram("root_net", root_net)
 
         actor = StockActor(sess=sess, root_net=root_net, inputs=state_inputs, state_dim=state_dim, action_dim=action_dim, action_bound=action_bound,
                             learning_rate=1e-4, tau=tau, batch_size=batch_size,
@@ -437,7 +464,7 @@ if __name__ == '__main__':
                              learning_rate=1e-3,
                              predictor_type=predictor_type, use_batch_norm=use_batch_norm)
         ddpg_model = DDPG(env=env, sess=sess, actor=actor, critic=critic, actor_noise=actor_noise,
-                          obs_normalizer=obs_normalizer,
+                          obs_normalizer="history",
                           model_save_path=model_save_path,
                           summary_path=summary_path)
         ddpg_model.initialize(load_weights=False)

@@ -50,7 +50,7 @@ class TestPortfolioSym(unittest.TestCase):
         w0 = np.array([1.0] + [0.0] * nb_tickers)
         w1 = np.concatenate(([0.0], np.ones(nb_tickers) / (nb_tickers)), axis=0)
         y1 = np.concatenate(([1.0], 2.0* np.ones(nb_tickers)), axis=0)
-        reward, info, done = self.portfolio_sym._step(w1, y1)
+        reward, info, done = self.portfolio_sym.step(w1, y1)
         self.assertEqual((1-self.cost)*2.0, self.portfolio_sym.p0, "all invested")
         self.assertEqual((1 - self.cost) * 2.0, info['portfolio_change'], "all invested")
 
@@ -60,7 +60,7 @@ class TestPortfolioSym(unittest.TestCase):
         pprint(info)
 
         y1 = np.ones(nb_tickers+1)
-        reward, info, done = self.portfolio_sym._step(w1, y1)
+        reward, info, done = self.portfolio_sym.step(w1, y1)
         self.assertAlmostEqual((1 - self.cost) * 2.0, self.portfolio_sym.p0, msg="no change", delta=DELTA_MU)
         self.assertAlmostEqual(1.0, info['portfolio_change'], msg="no portfolio change", delta=DELTA_MU)
 
@@ -70,7 +70,7 @@ class TestPortfolioSym(unittest.TestCase):
         pprint(info)
 
         y1 = np.ones(nb_tickers + 1) * 0.5
-        reward, info, done = self.portfolio_sym._step(w1, y1)
+        reward, info, done = self.portfolio_sym.step(w1, y1)
         self.assertAlmostEqual((1 - self.cost) * 1.0, self.portfolio_sym.p0, msg="no change", delta=DELTA_MU)
         self.assertAlmostEqual(0.5, info['portfolio_change'], msg="no portfolio change", delta=DELTA_MU)
 
