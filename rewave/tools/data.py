@@ -296,7 +296,7 @@ def date_to_index(date_string):
     """
     return (datetime.datetime.strptime(date_string, date_format) - start_datetime).days
 
-def create_optimal_imitation_dataset(history, training_data_ratio=0.8):
+def create_optimal_imitation_dataset2(history, training_data_ratio=0.8):
     """
 
     :param history: a list of frames with dimension nb_assets, window_length, features
@@ -308,9 +308,9 @@ def create_optimal_imitation_dataset(history, training_data_ratio=0.8):
     Ys = []
     for i in range(nb_samples):
         frame = history[i]
-        obs = frame[:, :-1, :]
+        obs = frame[:, :-2, :]
         label = np.zeros(dtype=np.float32, shape=(frame.shape[0],))
-        max_index = np.argmax(frame[:, -1, 0], axis=0)
+        max_index = np.argmax(frame[:, -2, 0], axis=0)
         label[max_index] = 1.0
         Xs.append(obs)
         Ys.append(label)
@@ -319,6 +319,30 @@ def create_optimal_imitation_dataset(history, training_data_ratio=0.8):
     num_training_sample = int(nb_samples * training_data_ratio)
     return (Xs[:num_training_sample], Ys[:num_training_sample]), \
            (Xs[num_training_sample:], Ys[num_training_sample:])
+
+def create_optimal_imitation_dataset(X_full, y_full, training_data_ratio=0.8):
+    """
+
+    :param history: a list of frames with dimension nb_assets, window_length, features
+    :param training_data_ratio: split ration
+    :return: dataset for further work
+    """
+    nb_samples = len(X_full)
+    Xs = []
+    Ys = []
+    for i in range(nb_samples):
+        obs = X_full[i]
+        label = np.zeros(dtype=np.float32, shape=(obs.shape[0],))
+        max_index = np.argmax(y_full[i], axis=0)
+        label[max_index] = 1.0
+        Xs.append(obs)
+        Ys.append(label)
+    Xs = np.stack(Xs, axis=0)
+    Ys = np.stack(Ys, axis=0)
+    num_training_sample = int(nb_samples * training_data_ratio)
+    return (Xs[:num_training_sample], Ys[:num_training_sample]), \
+           (Xs[num_training_sample:], Ys[num_training_sample:])
+
 
 def create_optimal_imitation_dataset_old(history, training_data_ratio=0.8, is_normalize=True):
     """ Create dataset for imitation optimal action given future observations

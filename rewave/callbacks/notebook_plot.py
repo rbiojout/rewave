@@ -5,10 +5,11 @@ from matplotlib import pyplot as plt
 #plt.rcParams["figure.figsize"] = (8,8)
 #plt.rcParams["figure.dpi"] = 72
 
-from matplotlib import dates as mdates
 import matplotlib
+import matplotlib.dates as mdates
+
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class LivePlotNotebook(object):
@@ -24,9 +25,10 @@ class LivePlotNotebook(object):
     """
 
     def __init__(self, log_dir=None, episode=0, labels=[], title='', ylabel='returns', colors=None, linestyles=None, legend_outside=True):
+        """
         if not matplotlib.rcParams['backend'] == 'nbAgg':
             logging.warn("The liveplot callback only work when matplotlib is using the nbAgg backend. Execute 'matplotlib.use('nbAgg', force=True)'' or '%matplotlib notebook'")
-
+        """
         self.log_dir = log_dir
         if log_dir:
             try:
@@ -35,10 +37,10 @@ class LivePlotNotebook(object):
                 pass
         self.i = episode
 
-        fig, ax = plt.subplots()
+        self.fig, self.ax = plt.subplots()
 
         for i in range(len(labels)):
-            ax.plot(
+            self.ax.plot(
                 [0] * 20,
                 label=labels[i],
                 alpha=0.75,
@@ -47,25 +49,28 @@ class LivePlotNotebook(object):
                 linestyle=linestyles[i] if linestyles else None,
             )
 
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_xlabel('date')
-        ax.set_ylabel(ylabel)
-        ax.grid()
-        ax.set_title(title)
+
+        #today = datetime.now()
+        #self.ax.set_xlim(today - timedelta(100), today)
+        self.ax.set_xlim(0, 1)
+
+        self.ax.set_ylim(0, 1)
+        self.ax.set_xlabel('date')
+        self.ax.set_ylabel(ylabel)
+        self.ax.grid()
+        self.ax.set_title(title)
 
         # give the legend it's own space, the right 20% where it right align left
         if legend_outside:
-            fig.subplots_adjust(right=0.8)
-            ax.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+            self.fig.subplots_adjust(right=0.8)
+            self.ax.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
         else:
-            ax.legend()
+            self.ax.legend()
 
-        self.ax = ax
-        self.fig = fig
 
     def update(self, x, ys, max=None):
         # let Matplotlib deal with the format of axis
+
 
         if max:
             x = x[-max:]
@@ -83,10 +88,13 @@ class LivePlotNotebook(object):
         y = np.concatenate(ys)
         y_extra = y.std() * 0.1
 
+        """
         if x.min() != x.max():
-            start = np.datetime64(x.min()).astype(datetime)
-            end = np.datetime64(x.max()).astype(datetime)
+            start = np.datetime64(x.min()) #.astype(datetime)
+            end = np.datetime64(x.max()) #.astype(datetime)
             self.ax.set_xlim(start, end)
+        """
+        self.ax.set_xlim(x.min(), x.max())
 
         if (y.min() - y_extra) != (y.max() + y_extra):
             self.ax.set_ylim(y.min() - y_extra, y.max() + y_extra)

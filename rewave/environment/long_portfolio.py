@@ -10,11 +10,12 @@
 import numpy as np
 import pandas as pd
 
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 from pprint import pprint
 
 import os
 import time
+import math
 
 import logging
 import sqlite3
@@ -200,7 +201,12 @@ class DataSrc(object):
 
         return X, y, last_w, setw, open_history, done
 
-
+    def get_sample(self, index):
+        M = self.get_submatrix(index)
+        M = np.array(M)
+        X = M[:, :-1, :]
+        y = M[:, -1, 0] / M[0, None, -2, 0]
+        return X, y
 
     def _pack_samples(self, indexs):
         """
@@ -264,7 +270,15 @@ class DataSrc(object):
         return history, y1, done
         """
     def full_history(self):
-        return [self.get_submatrix(indice) for indice in self.indices]
+        self.current_step = 0
+        X_full = []
+        y_full = []
+        for indice in self.indices:
+            X, y, *_ = self.step()
+            X_full.append(X)
+            y_full.append(y)
+        self.reset()
+        return X_full, y_full
 
     def reset(self):
         # reset the memory
@@ -390,13 +404,6 @@ class PortfolioSim(object):
         #reward = r1 / self.batch_size
         reward = r1 * 1000
 
-        # rescale between -1 and 1
-        y_max = y1.max()
-        y_min = y1.min()
-
-        y_scaled = 1 - 2*(p1/p0-y_max)/(y_min-y_max)
-
-        reward = y_scaled
 
         """
         max_y_indices = np.where(y1 == y1.max())
@@ -416,6 +423,18 @@ class PortfolioSim(object):
 
         # if we run out of money, we're done
         done = bool(p1 == 0)
+
+        # rescale between -1 and 1 for the reward
+        y_max = y1.max()
+        y_min = y1.min()
+        y_scaled = 1 - 2*(y_max-p1/p0)/(y_max-y_min)
+
+        reward = y_scaled - self.cost
+
+        # limit impact of changing the portfolio by adding penalty of costs
+        #reward =  (y_scaled + (mu1/(self.cost +eps) - 0.5))
+        if done:
+            reward = -10.0
 
         # should only return single values, not list
         info = {
@@ -679,10 +698,34 @@ class PortfolioEnv(gym.Env):
         elif mode == 'notebook':
             self.plot_notebook(close)
 
+    def plot_notebook2(self, close=False):
+        plt.ion()
+        df_info = pd.DataFrame(self.infos)
+
+        #f, ax = plt.subplots()
+        fig = plt.gcf()
+
+        #print("fig", type(fig))
+
+        all_assets = ['cash'] + self.sim.tickers_list
+        all_assets_names = ['price_' + name for name in all_assets]
+        y_assets = [df_info['price_' + name].cumprod()
+                    for name in all_assets]
+        y_return = df_info["y_return"].cumprod()
+        y_assets = [df_info['price_' + name].cumprod()
+                    for name in all_assets]
+
+        #ax.plot_date(df_info.index, y_return)
+        self._plot = df_info[all_assets_names + ["y_return","portfolio_value"]].cumprod().plot(fig=fig)
+        self._plot2 =df_info[['weight_' + name for name in all_assets]].plot(fig=fig)
+        self._plot3 =df_info[['cost']].cumsum().plot(fig=fig)
+
+
+
     def plot_notebook(self, close=False):
         """Live plot using the jupyter notebook rendering of matplotlib."""
         # @TODO fixme. For the moment, redraw from zero
-        #self._plot = self._plot2 = self._plot3 = None
+        # self._plot = self._plot2 = self._plot3 = None
 
         if close:
             self._plot = self._plot2 = self._plot3 = None
@@ -690,8 +733,10 @@ class PortfolioEnv(gym.Env):
 
         df_info = pd.DataFrame(self.infos)
         #df_info.index = pd.to_datetime(df_info["date"], unit='s')
-        df_info.index = pd.to_datetime(df_info["date"])
-        x = df_info.index.to_pydatetime()
+        #df_info.index = pd.to_datetime(df_info["date"])
+        #x = df_info.index.to_pydatetime()
+        x = df_info.index
+
 
         # plot prices and performance
         _plot_dir = None
@@ -706,7 +751,7 @@ class PortfolioEnv(gym.Env):
         y_return = df_info["y_return"].cumprod()
         y_assets = [df_info['price_' + name].cumprod()
                     for name in all_assets]
-        self._plot.update(x, y_assets + [y_portfolio]+ [y_return], max=100)
+        self._plot.update(x, y_assets + [y_portfolio] + [y_return], max=100)
 
 
         # plot portfolio weights

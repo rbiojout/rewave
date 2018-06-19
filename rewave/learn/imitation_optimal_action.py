@@ -12,13 +12,13 @@ from datetime import date
 import numpy as np
 
 from tensorflow.python.keras import backend as K
-from tensorflow.python.keras.layers import Input, Dense
+from tensorflow.python.keras.layers import Input, Dense, Flatten
 from tensorflow.python.keras.models import Model
 
 from tensorflow.python.keras.optimizers import Adam
 from tensorflow.python.keras.utils import to_categorical
 
-from learn.root_network import RootNetwork
+from rewave.learn.root_network import RootNetwork
 
 from rewave.environment.long_portfolio import PortfolioEnv
 from rewave.tools.data import create_optimal_imitation_dataset, create_imitation_dataset
@@ -44,8 +44,12 @@ def create_network_given_future(state_input,
     else:
         print('Build model from scratch')
 
+    net = Dense(300, activation="relu")(root_network)
+    net = Flatten()(net)
+    net = Dense(300, activation="relu")(net)
+
     nb_assets = state_input.shape[1]
-    output = Dense(nb_assets, activation='softmax')(root_network)
+    output = Dense(nb_assets, activation='softmax')(net)
 
     imitation_model = Model(state_input, output)
 

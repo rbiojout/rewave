@@ -4,12 +4,21 @@ import tensorflow as tf
 
 from tensorflow.python.keras.models import Model
 
-from tensorflow.python.keras.layers import Dense, BatchNormalization, Activation, Lambda
-from keras import regularizers
+from tensorflow.python.keras.layers import Layer, Input, Dense, BatchNormalization, Activation, Lambda, Flatten, Dropout, ELU
+from tensorflow.python.keras import regularizers
+from tensorflow.python.keras.initializers import RandomUniform, Constant
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.constraints import min_max_norm
+
+from tensorflow.python.ops import math_ops
+from tensorflow.python.keras._impl.keras import activations
 
 from tensorflow.python.keras.optimizers import Adam
 
+import tensorflow as tf
+
 DEBUG = True
+
 
 class Actor(object):
     """
@@ -34,12 +43,13 @@ class Actor(object):
 
         self.net = self.create_actor_model(self.state_input, self.root_net, self.action_dim, self.lr)
 
-    def create_actor_model(self, state_input, root_net, action_dim, lr=0.001):
+    def create_actor_model(self, state_input, root_net, action_dim, lr=0.001, dropout=0.3):
         """
         net = Dense(64, kernel_regularizer=regularizers.l2(0.01),
                 activity_regularizer=regularizers.l1(0.01), activation="relu")(root_net)
         """
-        net = Dense(64, activation="relu")(root_net)
+        net = Dense(40, activation="relu")(root_net)
+        #net = Dropout(dropout)(net)
         if self.use_batch_norm:
             net = BatchNormalization()(net)
         """
@@ -47,24 +57,35 @@ class Actor(object):
                     kernel_regularizer=regularizers.l2(0.01),
                     activity_regularizer=regularizers.l1(0.01), activation="relu")(net)
         """
-        net = Dense(128, activation="relu")(net)
+        net = Flatten()(net)
+        net = Dense(action_dim * 2, activation="sigmoid")(net)
+        #net = Dropout(dropout)(net)
         if self.use_batch_norm:
             net = BatchNormalization()(net)
+
+
         # Final layer weights are init to Uniform[-3e-3, 3e-3]
+        random_initializer = RandomUniform(minval=0.01, maxval=0.1, seed=None)
+
+        # add input
+        # @TODO add the previous action
+
         actor_out = Dense(action_dim,
-                          #kernel_initializer="random_uniform",
-                          activation='softmax',
-                          #activation="relu",
-                          #activity_regularizer=regularizers.l1(0.01),
+                          #kernel_initializer=random_initializer,
+                          #kernel_initializer="glorot_uniform", # for softmax
+                          #kernel_initializer="he_uniform", # for relu
+                          activation="softmax",
+                          # activation="relu",
+                          kernel_initializer= Constant(1.0/action_dim),
                           name="actor_out")(net)
 
-        #actor_out = Lambda(lambda x: x / tf.norm(x, ord=1))(actor_out)
+        # actor_out = CustomActivation()(actor_out)
+        #actor_out = Lambda(lambda x: tf.sigmoid(x) /  (1e-5+ tf.norm(tf.sigmoid(x), axis=0, ord=1, keep_dims=True)))(actor_out)
 
         actor_model = Model(inputs=state_input, outputs=actor_out)
-        adam = Adam(lr=lr, clipnorm=1., clipvalue=0.5)
-        actor_model.compile(loss="mse", optimizer=adam)
         if DEBUG:
             print("ACTOR MODEL :", actor_model.summary())
+
 
         return actor_model
 

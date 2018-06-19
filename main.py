@@ -1,5 +1,5 @@
 from __future__ import absolute_import
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 
@@ -103,7 +103,7 @@ def main2():
 
     predictor_list = ['lstm', 'cnn', 'dense']
     batch_norm_list = [False, True]
-    window_length_list = [7, 10, 15, 20]
+    window_length_list = [5, 10, 15, 20]
 
     for predictor_type in predictor_list:
         for use_batch_norm in batch_norm_list:
@@ -136,6 +136,63 @@ def main2():
                     ddpg_model.initialize(load_weights=False)
                     ddpg_model.train()
 
+def predict():
+    print("STRATING PreDICT")
+    start_date = date(2017, 1, 1)
+    end_date = date(2018, 1, 1)
+    features_list = ['open', 'high', 'low', 'close']
+    tickers_list = ['AAPL', 'ATVI', 'CMCSA', 'COST', 'CSX', 'DISH', 'EA', 'EBAY', 'FB', 'GOOGL', 'HAS', 'ILMN',
+                    'INTC',
+                    'MAR', 'REGN', 'SBUX']
+
+    predictor_list = ['lstm', 'cnn', 'dense']
+    batch_norm_list = [False, True]
+    window_length_list = [5, 10, 15, 20]
+
+    for predictor_type in predictor_list:
+        for use_batch_norm in batch_norm_list:
+            for window_length in window_length_list:
+                # setup environment
+                num_training_time = 200
+                env = PortfolioEnv(start_date, end_date,
+                                   window_length,
+                                   tickers_list, features_list,
+                                   trading_cost=0.00,
+                                   batch_size=num_training_time)
+
+                # variable_scope ="ddpg"
+                action_dim = env.action_space.shape[0]
+                actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(action_dim))
+
+                model_save_path = get_model_path(window_length, predictor_type, use_batch_norm)
+                summary_path = get_result_path(window_length, predictor_type, use_batch_norm)
+
+                print("MODEL   :", model_save_path)
+                tf.reset_default_graph()
+                sess = tf.Session()
+
+                with sess.as_default():
+                    # Missing this was the source of one of the most challenging an insidious bugs that I've ever encountered.
+                    # it was impossible to save the model.
+                    K.set_session(sess)
+
+                    ddpg_model = DDPG2(env, sess, actor_noise, action_dim=action_dim, obs_normalizer="history",
+                                       predictor_type=predictor_type, use_batch_norm=use_batch_norm,
+                                       model_save_path=model_save_path, summary_path=summary_path)
+                    ddpg_model.initialize(load_weights=True)
+                    observation = env.reset()
+                    done = False
+                    while not done:
+                        action = ddpg_model.predict_single(observation)
+                        observation, reward, done, infos = env.step(action)
+                        print(datetime.fromtimestamp(infos['date']).strftime('%Y-%m-%d'),
+                              infos['portfolio_change'] / infos['y_return'], infos['portfolio_value'],
+                              infos['market_value'], infos['weight_cash'], infos['weight_AAPL'])
+                    df = env.df_info()
+                    print(df.iloc[-1, :])
+                    print(df.describe())
+                sess.close()
+
 if __name__ == "__main__":
-    main2()
+    predict()
     
